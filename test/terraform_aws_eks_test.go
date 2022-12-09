@@ -13,11 +13,6 @@ import (
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
-// This is a complicated, end-to-end integration test. It builds the AMI from examples/packer-docker-example,
-// deploys it using the Terraform code on examples/terraform-packer-example, and checks that the web server in the AMI
-// response to requests. The test is broken into "stages" so you can skip stages by setting environment variables (e.g.,
-// skip stage "build_ami" by setting the environment variable "SKIP_build_ami=true"), which speeds up iteration when
-// running this test over and over again locally.
 func TestTerraformAwsEks(t *testing.T) {
 	t.Parallel()
 
@@ -66,6 +61,8 @@ func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 			"cluster_name":             clusterID,
 			"node_group_instance_type": instanceType,
 		},
+
+		NoColor: true,
 	})
 
 	// Save the Terraform Options struct, instance name, and instance text so future test stages can use it
