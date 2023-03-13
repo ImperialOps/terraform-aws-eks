@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/gruntwork-io/terratest/modules/aws"
+	"github.com/gruntwork-io/terratest/modules/logger"
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
@@ -17,23 +18,23 @@ func TestTerraformAwsEks(t *testing.T) {
 	t.Parallel()
 
 	// The folder where we have our Terraform code
-	workingDir := "../examples/test"
+	workingDir := "../examples/main"
 
 	// At the end of the test, undeploy the web app using Terraform
-	defer test_structure.RunTestStage(t, "cleanup_terraform", func() {
+	defer test_structure.RunTestStage(t, "teardown", func() {
 		undeployUsingTerraform(t, workingDir)
 	})
 
 	// Deploy the cluster using Terraform
 	test_structure.RunTestStage(t, "deploy_terraform", func() {
 		awsRegion := aws.GetRandomStableRegion(t, []string{"eu-west-2", "eu-west-1"}, nil)
-		test_structure.SaveString(t, workingDir, "awsRegion", awsRegion)
+		test_structure.SaveString(t, workingDir, "aws_region", awsRegion)
 		deployUsingTerraform(t, awsRegion, workingDir)
 	})
 
 	// Validate that the cluster is deployed and is responsive
 	test_structure.RunTestStage(t, "validate_cluster", func() {
-		awsRegion := test_structure.LoadString(t, workingDir, "aws")
+		awsRegion := test_structure.LoadString(t, workingDir, "aws_region")
 		validateClusterRunning(t, awsRegion, workingDir)
 	})
 }
@@ -46,9 +47,6 @@ func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 	clusterID := fmt.Sprintf("terratest-%s", random.UniqueId())
 	test_structure.SaveString(t, workingDir, "cluster_id", clusterID)
 
-	// Some AWS regions are missing certain instance types, so pick an available type based on the region we picked
-	instanceType := aws.GetRecommendedInstanceType(t, awsRegion, []string{"t3.medium", "t2.medium"})
-
 	// Construct the terraform options with default retryable errors to handle the most common retryable errors in
 	// terraform testing.
 	terraformOptions := terraform.WithDefaultRetryableErrors(t, &terraform.Options{
@@ -57,9 +55,8 @@ func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 
 		// Variables to pass to our Terraform code using -var options
 		Vars: map[string]interface{}{
-			"aws_region":               awsRegion,
-			"cluster_name":             clusterID,
-			"node_group_instance_type": instanceType,
+			"aws_region":   awsRegion,
+			"cluster_name": clusterID,
 		},
 
 		NoColor: true,
@@ -82,14 +79,17 @@ func undeployUsingTerraform(t *testing.T, workingDir string) {
 
 // Validate the web server has been deployed and is working
 func validateClusterRunning(t *testing.T, awsRegion string, workingDir string) {
+	logger.Log(t, "Getting terraform options")
 	// Load the Terraform Options saved by the earlier deploy_terraform stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
+	logger.Log(t, "Getting cluster id from test structure")
 	expectedClusterID := test_structure.LoadString(t, workingDir, "cluster_id")
 
+	logger.Log(t, "Getting cluster id from outputs")
 	// Run `terraform output` to get the value of an output variable
 	clusterID := terraform.Output(t, terraformOptions, "eks_cluster_id")
-	t.Log("Asserting cluster id")
+	logger.Log(t, "Asserting cluster id")
 	assert.Equal(t, clusterID, expectedClusterID)
 
 	t.Log("Getting clientset")

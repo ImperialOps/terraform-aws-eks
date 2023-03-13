@@ -1,4 +1,20 @@
 ################################################################################
+# GLOBAL
+################################################################################
+
+variable "create" {
+  description = "Controls if EKS resources should be created (affects nearly all resources)"
+  type        = bool
+  default     = true
+}
+
+variable "tags" {
+  description = "A map of tags to add to all resources"
+  type        = map(string)
+  default     = {}
+}
+
+################################################################################
 # EKS
 ################################################################################
 
@@ -25,12 +41,6 @@ variable "cluster_endpoint_public_access" {
   default     = false
 }
 
-variable "node_group_instance_type" {
-  description = "Set the instance type of the initial node group that karpenter runs on"
-  type        = string
-  default     = "t3.medium"
-}
-
 ################################################################################
 # NETWORKING
 ################################################################################
@@ -41,21 +51,39 @@ variable "vpc_id" {
 }
 
 variable "subnet_ids" {
-  description = "IDs of subnets to deploy cluster into"
+  description = "A list of subnet IDs where the nodes/node groups will be provisioned. If `control_plane_subnet_ids` is not provided, the EKS cluster control plane (ENIs) will be provisioned in these subnets"
   type        = list(string)
+}
+
+variable "control_plane_subnet_ids" {
+  description = "A list of subnet IDs where the EKS cluster control plane (ENIs) will be provisioned. Used for expanding the pool of subnets used by nodes/node groups without replacing the EKS control plane"
+  type        = list(string)
+  default     = []
+}
+
+variable "subnet_account_id" {
+  description = "Account ID of where the subnets Karpenter will utilize resides. Used when subnets are shared from another account"
+  type        = string
+  default     = ""
 }
 
 ################################################################################
 # KARPENTER
 ################################################################################
 
-variable "deploy_karpenter_provisioner" {
-  description = "Wether to deploy the a default Karpenter provisioner"
+variable "create_karpenter" {
+  description = "Controls whether to deploy the a Karpenter"
   type        = bool
   default     = true
 }
 
-variable "node_volume_size" {
+variable "create_karpenter_provisioner" {
+  description = "Controls whether to deploy the a default Karpenter provisioner"
+  type        = bool
+  default     = true
+}
+
+variable "karpenter_node_volume_size" {
   description = "Volume size of nodes in the cluster in GB"
   type        = number
   default     = 40
@@ -68,9 +96,15 @@ variable "karpenter_provisioner_max_cpu" {
 }
 
 variable "karpenter_provisioner_max_memory" {
-  description = "The max memory the default provisioner will deploy"
+  description = "The max memory the default provisioner will deploy in Gi"
   type        = number
   default     = 80
+}
+
+variable "karpenter_tag_key" {
+  description = "Tag key (`{key = value}`) applied to resources launched by Karpenter through the Karpenter provisioner. Used when creating multiple cluster in a single VPC"
+  type        = string
+  default     = "karpenter.sh/discovery"
 }
 
 ################################################################################
@@ -78,17 +112,7 @@ variable "karpenter_provisioner_max_memory" {
 ################################################################################
 
 variable "create_spot_service_linked_role" {
-  description = "Indicates whether or not to create the spot.amazonaws.com service linked role"
+  description = "Controls whether or not to create the spot.amazonaws.com service linked role"
   type        = bool
   default     = true
-}
-
-################################################################################
-# GENERAL
-################################################################################
-
-variable "tags" {
-  description = "A map of tags to add to all resources"
-  type        = map(string)
-  default     = {}
 }

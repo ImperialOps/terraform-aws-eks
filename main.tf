@@ -6,7 +6,7 @@ locals {
   name            = var.cluster_name
   cluster_version = var.cluster_version
 
-  partition = data.aws_partition.current.partition
+  create = var.create
 
   tags = var.tags
 }
@@ -17,106 +17,80 @@ locals {
 
 module "eks" {
   source  = "terraform-aws-modules/eks/aws"
-  version = "~> 18.0"
+  version = "~> 19.0"
 
+  create                          = local.create
   cluster_name                    = local.name
   cluster_version                 = local.cluster_version
   cluster_endpoint_private_access = var.cluster_endpoint_private_access
   cluster_endpoint_public_access  = var.cluster_endpoint_public_access
 
-  vpc_id     = var.vpc_id
-  subnet_ids = var.subnet_ids
+  vpc_id                   = var.vpc_id
+  subnet_ids               = var.subnet_ids
+  control_plane_subnet_ids = coalescelist(var.control_plane_subnet_ids, var.subnet_ids)
 
   enable_irsa = true
 
   cluster_addons = {
-    coredns = {
-      resolve_conflicts = "OVERWRITE"
-    }
-    kube-proxy = {
-      resolve_conflicts = "OVERWRITE"
-    }
-    vpc-cni = {
-      resolve_conflicts = "OVERWRITE"
-    }
+    kube-proxy = {}
+    vpc-cni    = {}
     aws-ebs-csi-driver = {
-      resolve_conflicts        = "OVERWRITE"
       service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
     }
+    coredns = {
+      configuration_values = jsonencode({
+        computeType = "Fargate"
+      })
+    }
   }
+
+  # Fargate profiles use the cluster primary security group so these are not utilized
+  create_cluster_security_group = false
+  create_node_security_group    = false
+
+  manage_aws_auth_configmap = true
+  aws_auth_roles = [
+    # We need to add in the Karpenter node IAM role for nodes launched by Karpenter
+    {
+      rolearn  = module.karpenter_irsa.role_arn
+      username = "system:node:{{EC2PrivateDNSName}}"
+      groups = [
+        "system:bootstrappers",
+        "system:nodes",
+      ]
+    },
+  ]
+
+  fargate_profiles = merge(
+    { for i in range(0, length(var.subnet_ids)) :
+      "${local.name}-kube-system-${i}" => {
+        selectors = [
+          { namespace = "kube-system" }
+        ]
+        # We want to create a profile per AZ for high availability
+        subnet_ids = [element(var.subnet_ids, i)]
+      }
+    },
+    { for i in range(0, length(var.subnet_ids)) :
+      "${local.name}-karpenter-${i}" => {
+        selectors = [
+          { namespace = "karpenter" }
+        ]
+        # We want to create a profile per AZ for high availability
+        subnet_ids = [element(var.subnet_ids, i)]
+      }
+    },
+  )
 
   # Encryption key
-  create_kms_key = true
-  cluster_encryption_config = [{
-    resources = ["secrets"]
-  }]
-  kms_key_deletion_window_in_days = 7
-  enable_kms_key_rotation         = true
-
-  node_security_group_additional_rules = {
-    # Control plane invoke Karpenter webhook
-    ingress_karpenter_webhook_tcp = {
-      description                   = "Control plane invoke Karpenter webhook"
-      protocol                      = "tcp"
-      from_port                     = 8443
-      to_port                       = 8443
-      type                          = "ingress"
-      source_cluster_security_group = true
-    }
-    ingress_self_all = {
-      description = "Node to node all ports/protocols"
-      protocol    = "-1"
-      from_port   = 0
-      to_port     = 0
-      type        = "ingress"
-      self        = "true"
-    }
-    egress_all = {
-      description = "Node all egress"
-      protocol    = "-1"
-      from_port   = 0
-      to_port     = 0
-      type        = "egress"
-      cidr_blocks = ["0.0.0.0/0"]
-    }
-  }
-
-  node_security_group_tags = {
-    "karpenter.sh/discovery/${local.name}" = local.name
-  }
-
-  eks_managed_node_groups = {
-    karpenter = {
-      instance_types        = [var.node_group_instance_type]
-      create_security_group = false
-
-      min_size     = 1
-      max_size     = 1
-      desired_size = 1
-
-      iam_role_additional_policies = [
-        "arn:${local.partition}:iam::aws:policy/AmazonSSMManagedInstanceCore"
-      ]
-
-      block_device_mappings = {
-        xvda = {
-          device_name = "/dev/xvda"
-          ebs = {
-            volume_size           = var.node_volume_size
-            volume_type           = "gp3"
-            iops                  = 3000
-            throughput            = 125
-            encrypted             = true
-            kms_key_id            = data.aws_kms_key.aws_ebs.arn
-            delete_on_termination = true
-          }
-        }
-      }
-    }
+  create_kms_key = false
+  cluster_encryption_config = {
+    resources        = ["secrets"]
+    provider_key_arn = module.kms.key_arn
   }
 
   tags = merge(local.tags, {
-    "karpenter.sh/discovery/${local.name}" = local.name
+    (var.karpenter_tag_key) = local.name
   })
 }
 
@@ -126,8 +100,9 @@ module "eks" {
 
 module "ebs_csi_irsa_role" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = ">= 5.3"
+  version = ">= 5.13"
 
+  create_role           = local.create
   role_name             = "ebs-csi-${local.name}"
   attach_ebs_csi_policy = true
 
@@ -141,87 +116,89 @@ module "ebs_csi_irsa_role" {
   tags = local.tags
 }
 
-module "karpenter_irsa_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = ">= 5.3"
+resource "aws_iam_service_linked_role" "spot" {
+  count = local.create && var.create_spot_service_linked_role ? 1 : 0
 
-  role_name = "karpenter-controller-${local.name}"
-
-  attach_karpenter_controller_policy = true
-  karpenter_controller_cluster_id    = module.eks.cluster_id
-  karpenter_subnet_account_id        = data.aws_caller_identity.current.account_id
-  karpenter_tag_key                  = "karpenter.sh/discovery/${local.name}"
-  karpenter_controller_node_iam_role_arns = [
-    module.eks.eks_managed_node_groups["karpenter"].iam_role_arn
-  ]
-
-  oidc_providers = {
-    ex = {
-      provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["karpenter:karpenter"]
-    }
-  }
-
-  tags = local.tags
+  aws_service_name = "spot.amazonaws.com"
 }
 
 ################################################################################
 # KARPENTER
 ################################################################################
 
-resource "aws_iam_instance_profile" "karpenter" {
-  name = "KarpenterNodeInstanceProfile-${local.name}"
-  role = module.eks.eks_managed_node_groups["karpenter"].iam_role_name
+locals {
+  create_karpenter             = local.create && var.create_karpenter
+  create_karpenter_provisioner = local.create && var.create_karpenter_provisioner
+  subnet_account_id            = coalesce(var.subnet_account_id, data.aws_caller_identity.current.account_id)
 }
 
-resource "aws_iam_service_linked_role" "spot" {
-  count = var.create_spot_service_linked_role ? 1 : 0
+module "karpenter_irsa" {
+  source  = "terraform-aws-modules/eks/aws//modules/karpenter"
+  version = "~> 19.0"
 
-  aws_service_name = "spot.amazonaws.com"
+  create                 = local.create_karpenter
+  cluster_name           = module.eks.cluster_name
+  irsa_name              = local.name
+  queue_name             = local.name
+  iam_role_name          = local.name
+  irsa_oidc_provider_arn = module.eks.oidc_provider_arn
+  irsa_subnet_account_id = local.subnet_account_id
+  irsa_tag_key           = var.karpenter_tag_key
+
+  tags = local.tags
 }
 
-resource "helm_release" "karpenter" {
-  namespace        = "karpenter"
-  create_namespace = true
+module "karpenter_helm" {
+  source  = "terraform-module/release/helm"
+  version = "2.8.0"
 
-  name       = "karpenter"
+  namespace  = "karpenter"
   repository = "oci://public.ecr.aws/karpenter"
-  chart      = "karpenter"
-  version    = "v0.19.3"
 
-  set {
-    name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
-    value = module.karpenter_irsa_role.iam_role_arn
+  app = {
+    deploy              = local.create_karpenter
+    create_namespace    = local.create_karpenter
+    repository_username = data.aws_ecrpublic_authorization_token.virginia.user_name
+    repository_password = data.aws_ecrpublic_authorization_token.virginia.password
+    name                = "karpenter"
+    version             = "v0.27.0"
+    chart               = "karpenter"
   }
 
-  set {
-    name  = "settings.aws.clusterName"
-    value = module.eks.cluster_id
-  }
-
-  set {
-    name  = "settings.aws.clusterEndpoint"
-    value = module.eks.cluster_endpoint
-  }
-
-  set {
-    name  = "settings.aws.defaultInstanceProfile"
-    value = aws_iam_instance_profile.karpenter.name
-  }
-
-  set {
-    name  = "replicas"
-    value = 1
-  }
-
-  set {
-    name  = "loglevel"
-    value = "info"
-  }
+  set = [
+    {
+      name  = "serviceAccount.annotations.eks\\.amazonaws\\.com/role-arn"
+      value = module.karpenter_irsa.irsa_arn
+    },
+    {
+      name  = "settings.aws.defaultInstanceProfile"
+      value = module.karpenter_irsa.instance_profile_name
+    },
+    {
+      name  = "settings.aws.interruptionQueueName"
+      value = module.karpenter_irsa.queue_name
+    },
+    {
+      name  = "settings.aws.clusterName"
+      value = module.eks.cluster_name
+    },
+    {
+      name  = "settings.aws.clusterEndpoint"
+      value = module.eks.cluster_endpoint
+    },
+    {
+      name  = "replicas"
+      value = "2"
+    },
+    {
+      name  = "loglevel"
+      value = "info"
+    }
+  ]
 }
 
 resource "kubectl_manifest" "karpenter_provisioner" {
-  count = var.deploy_karpenter_provisioner ? 1 : 0
+  count = local.create_karpenter_provisioner ? 1 : 0
 
   yaml_body = <<-YAML
   apiVersion: karpenter.sh/v1alpha5
@@ -235,12 +212,19 @@ resource "kubectl_manifest" "karpenter_provisioner" {
     requirements:
       - key: karpenter.sh/capacity-type
         operator: In
-        values: ["spot", "on_demand"]
+        values: ["spot", "on-demand"]
+      - key: karpenter.k8s.aws/instance-category
+        operator: In
+        values: ["t"]
+      - key: karpenter.k8s.aws/instance-family
+        operator: In
+        values: ["t3", "t3a"]
     limits:
       resources:
         cpu: ${var.karpenter_provisioner_max_cpu}
-        memory: ${var.karpenter_provisioner_max_memory}
+        memory: ${var.karpenter_provisioner_max_memory}Gi
     kubeletConfiguration:
+      containerRuntime: containerd
       systemReserved:
         cpu: 100m
         memory: 100Mi
@@ -262,47 +246,82 @@ resource "kubectl_manifest" "karpenter_provisioner" {
         nodefs.available: 1m30s
         nodefs.inodesFree: 2m
       evictionMaxPodGracePeriod: 180
-      podsPerCore: 2
-      maxPods: 20
-    provider:
-      subnetSelector:
-        "karpenter.sh/discovery/${local.name}": ${local.name}
-      securityGroupSelector:
-        "karpenter.sh/discovery/${local.name}": ${local.name}
-      tags:
-        "karpenter.sh/discovery/${local.name}": ${local.name}
-        Name: karpenter/${local.name}/default
-        karpenter.sh/provisioner-name: default
-      blockDeviceMappings:
-        - deviceName: /dev/xvda
-          ebs:
-            volumeSize: "${var.node_volume_size}Gi"
-            volumeType: gp3
-            iops: 3000
-            encrypted: true
-            kmsKeyID: ${data.aws_kms_key.aws_ebs.arn}
-            deleteOnTermination: true
-            throughput: 125
+      podsPerCore: 4
+      maxPods: 40
+    providerRef:
+      name: default
   YAML
 
-  depends_on = [
-    helm_release.karpenter
-  ]
+  depends_on = [module.karpenter_helm]
+}
+
+resource "kubectl_manifest" "karpenter_node_template" {
+  count = local.create_karpenter_provisioner ? 1 : 0
+
+  yaml_body = <<-YAML
+  apiVersion: karpenter.k8s.aws/v1alpha1
+  kind: AWSNodeTemplate
+  metadata:
+    name: default
+  spec:
+    subnetSelector:
+      ${var.karpenter_tag_key}: ${local.name}
+    securityGroupSelector:
+      ${var.karpenter_tag_key}: ${local.name}
+    tags:
+      ${var.karpenter_tag_key}: ${local.name}
+      Name: karpenter/${local.name}/default
+      karpenter.sh/provisioner-name: default
+    blockDeviceMappings:
+      - deviceName: /dev/xvda
+        ebs:
+          volumeSize: "${var.karpenter_node_volume_size}Gi"
+          volumeType: gp3
+          iops: 5000
+          encrypted: true
+          kmsKeyID: ${data.aws_kms_key.aws_ebs.arn}
+          deleteOnTermination: true
+          throughput: 125
+  YAML
+
+  depends_on = [module.karpenter_helm]
 }
 
 ################################################################################
 # STORAGE CLASS
 ################################################################################
 
-resource "kubernetes_storage_class" "gp2_encrypted" {
+resource "kubernetes_storage_class" "this" {
+  count = local.create ? 1 : 0
+
   metadata {
     name = "gp2-encrypted"
   }
+
   storage_provisioner = "ebs.csi.aws.com"
   reclaim_policy      = "Delete"
   volume_binding_mode = "WaitForFirstConsumer"
+
   parameters = {
     encrypted = "true"
     kmsKeyId  = data.aws_kms_key.aws_ebs.arn
   }
+}
+
+################################################################################
+# KMS
+################################################################################
+
+module "kms" {
+  source  = "terraform-aws-modules/kms/aws"
+  version = "1.5.0"
+
+  create                  = local.create
+  aliases                 = ["eks/${local.name}"]
+  description             = "${local.name} cluster encryption key"
+  enable_default_policy   = true
+  key_owners              = [data.aws_caller_identity.current.arn]
+  deletion_window_in_days = 7
+
+  tags = local.tags
 }
