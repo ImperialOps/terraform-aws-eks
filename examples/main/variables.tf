@@ -9,15 +9,3 @@ variable "cluster_name" {
   type        = string
   default     = "main-example"
 }
-
-variable "tags" {
-  description = "Allow tests to set tags"
-  type        = map(string)
-  default = {
-    project_code = "PO-1234"
-    project_name = "EXAMPLE"
-    github_repo  = "terraform-aws-eks"
-    owner        = "platforms"
-    environment  = "shared"
-  }
-}

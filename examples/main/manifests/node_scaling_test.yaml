@@ -3,14 +3,14 @@ kind: Deployment
 metadata:
   name: inflate
 spec:
-  replicas: 0
+  replicas: 4
   selector:
     matchLabels:
-      app: inflate
+      app: node-scaling-test
   template:
     metadata:
       labels:
-        app: inflate
+        app: node-scaling-test
     spec:
       terminationGracePeriodSeconds: 0
       containers:

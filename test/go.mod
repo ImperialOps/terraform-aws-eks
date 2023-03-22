@@ -1,14 +1,14 @@
-module github.com/stuxcd/terraform-aws-eks
+module gitlab.core.data-edge.cloud/devops/terraform-aws-eks
 
 go 1.19
 
 require (
-	github.com/aws/aws-sdk-go v1.44.155
+	github.com/aws/aws-sdk-go v1.44.213
 	github.com/gruntwork-io/terratest v0.41.4
 	github.com/stretchr/testify v1.8.0
 	k8s.io/apimachinery v0.25.4
 	k8s.io/client-go v0.25.4
-	sigs.k8s.io/aws-iam-authenticator v0.5.12
+	sigs.k8s.io/aws-iam-authenticator v0.6.7
 )
 
 require (

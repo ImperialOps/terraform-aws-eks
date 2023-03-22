@@ -8,6 +8,14 @@ locals {
 
   vpc_cidr = "10.0.0.0/16"
   azs      = slice(data.aws_availability_zones.available.names, 0, 2)
+
+  tags = {
+    project_code = "PO-1234"
+    project_name = "EXAMPLE"
+    github_repo  = "terraform-aws-eks"
+    owner        = "platforms"
+    environment  = "shared"
+  }
 }
 
 ################################################################################
@@ -42,7 +50,7 @@ module "eks" {
   karpenter_node_volume_size       = 40
   karpenter_tag_key                = "karpenter.sh/discovery/${local.cluster_name}"
 
-  tags = var.tags
+  tags = local.tags
 }
 
 ################################################################################
@@ -74,5 +82,5 @@ module "vpc" {
     "karpenter.sh/discovery/${local.cluster_name}" = local.cluster_name
   }
 
-  tags = var.tags
+  tags = local.tags
 }

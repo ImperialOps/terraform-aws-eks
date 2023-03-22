@@ -1,17 +1,21 @@
 package test
 
 import (
-	"context"
 	"fmt"
+	"os"
+	"os/exec"
 	"testing"
+	"time"
 
 	"github.com/gruntwork-io/terratest/modules/aws"
+	"github.com/gruntwork-io/terratest/modules/k8s"
 	"github.com/gruntwork-io/terratest/modules/logger"
 	"github.com/gruntwork-io/terratest/modules/random"
 	"github.com/gruntwork-io/terratest/modules/terraform"
 	test_structure "github.com/gruntwork-io/terratest/modules/test-structure"
 	"github.com/stretchr/testify/assert"
-	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+	"github.com/stretchr/testify/require"
+	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 )
 
 func TestTerraformAwsEks(t *testing.T) {
@@ -20,7 +24,13 @@ func TestTerraformAwsEks(t *testing.T) {
 	// The folder where we have our Terraform code
 	workingDir := "../examples/main"
 
-	// At the end of the test, undeploy the web app using Terraform
+	// Create a kubeconfig file that terratest modules can consume
+	f, err := os.CreateTemp("", "kubeconfig")
+	require.NoErrorf(t, err, "error creating temporary file: %s", err)
+	defer os.Remove(f.Name())
+	test_structure.SaveString(t, workingDir, "kubeconfig", f.Name())
+
+	// At the end of the test, undeploy using Terraform
 	defer test_structure.RunTestStage(t, "teardown", func() {
 		undeployUsingTerraform(t, workingDir)
 	})
@@ -28,6 +38,7 @@ func TestTerraformAwsEks(t *testing.T) {
 	// Deploy the cluster using Terraform
 	test_structure.RunTestStage(t, "deploy_terraform", func() {
 		awsRegion := aws.GetRandomStableRegion(t, []string{"eu-west-2", "eu-west-1"}, nil)
+		t.Logf("aws region is: %s", awsRegion)
 		test_structure.SaveString(t, workingDir, "aws_region", awsRegion)
 		deployUsingTerraform(t, awsRegion, workingDir)
 	})
@@ -37,15 +48,29 @@ func TestTerraformAwsEks(t *testing.T) {
 		awsRegion := test_structure.LoadString(t, workingDir, "aws_region")
 		validateClusterRunning(t, awsRegion, workingDir)
 	})
+
+	// Validate cluster can scale up
+	test_structure.RunTestStage(t, "scale_nodes_up", func() {
+		validateNodeScaleUp(t, workingDir)
+	})
+
+	// Validate cluster can scale down
+	test_structure.RunTestStage(t, "scale_nodes_down", func() {
+		validateNodeScaleDown(t, workingDir)
+	})
+
+	// Validate storage class creates volumes
+	test_structure.RunTestStage(t, "storage_class", func() {
+		validateStorageClass(t, workingDir)
+	})
 }
 
 // Deploy the terraform-packer-example using Terraform
 func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
-	t.Logf("Running in aws region: %s", awsRegion)
-
 	// a unique cluster ID so we won't clash with anything already in the AWS account
-	clusterID := fmt.Sprintf("terratest-%s", random.UniqueId())
-	test_structure.SaveString(t, workingDir, "cluster_id", clusterID)
+	clusterName := fmt.Sprintf("terratest-%s", random.UniqueId())
+	t.Logf("cluster name is: %s", clusterName)
+	test_structure.SaveString(t, workingDir, "cluster_name", clusterName)
 
 	// Construct the terraform options with default retryable errors to handle the most common retryable errors in
 	// terraform testing.
@@ -56,7 +81,7 @@ func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 		// Variables to pass to our Terraform code using -var options
 		Vars: map[string]interface{}{
 			"aws_region":   awsRegion,
-			"cluster_name": clusterID,
+			"cluster_name": clusterName,
 		},
 
 		NoColor: true,
@@ -77,33 +102,91 @@ func undeployUsingTerraform(t *testing.T, workingDir string) {
 	terraform.Destroy(t, terraformOptions)
 }
 
-// Validate the web server has been deployed and is working
+// Validate the cluster is running
 func validateClusterRunning(t *testing.T, awsRegion string, workingDir string) {
-	logger.Log(t, "Getting terraform options")
 	// Load the Terraform Options saved by the earlier deploy_terraform stage
 	terraformOptions := test_structure.LoadTerraformOptions(t, workingDir)
 
-	logger.Log(t, "Getting cluster id from test structure")
-	expectedClusterID := test_structure.LoadString(t, workingDir, "cluster_id")
+	expectedClusterName := test_structure.LoadString(t, workingDir, "cluster_name")
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
 
-	logger.Log(t, "Getting cluster id from outputs")
 	// Run `terraform output` to get the value of an output variable
-	clusterID := terraform.Output(t, terraformOptions, "eks_cluster_id")
-	logger.Log(t, "Asserting cluster id")
-	assert.Equal(t, clusterID, expectedClusterID)
+	clusterName := terraform.Output(t, terraformOptions, "cluster_name")
+	assert.Equal(t, clusterName, expectedClusterName)
 
-	t.Log("Getting clientset")
-	// Get Kubernetes client set to verify responsiveness
-	clientset, err := newEksClientset(clusterID, awsRegion)
-	if err != nil {
-		t.Errorf("Error getting EKS client set: %v", err)
+	cmd := exec.Command("aws", "eks", "update-kubeconfig", "--name", clusterName, "--region", awsRegion, "--kubeconfig", kubeconfig)
+	err := cmd.Run()
+	require.NoErrorf(t, err, "error running aws command", cmd.Args)
+}
+
+// Validate the cluster can scale up
+func validateNodeScaleUp(t *testing.T, workingDir string) {
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
+	kubeResourcePath := "../examples/main/manifests/node_scaling_test.yaml"
+	options := k8s.NewKubectlOptions("", kubeconfig, "default")
+	filter := v1.ListOptions{
+		LabelSelector: "app=node-scaling-test",
 	}
-	t.Log("Getting nodes")
-	// Run query on nodes
-	nodes, err := clientset.CoreV1().Nodes().List(context.TODO(), metav1.ListOptions{})
-	if err != nil {
-		t.Errorf("Error getting EKS nodes: %v", err)
+
+	// Get nodes prior to apply
+	nodesPre := k8s.GetReadyNodes(t, options)
+	test_structure.SaveInt(t, workingDir, "nodes_predeployment", len(nodesPre))
+
+	defer k8s.KubectlDelete(t, options, kubeResourcePath)
+	k8s.KubectlApply(t, options, kubeResourcePath)
+	k8s.WaitUntilNumPodsCreated(t, options, filter, 4, 6, 5*time.Second)
+	k8s.WaitUntilAllNodesReady(t, options, 12, 10*time.Second)
+
+	pods := k8s.ListPods(t, options, filter)
+	for _, pod := range pods {
+		// allow time for new node to pull image
+		k8s.WaitUntilPodAvailable(t, options, pod.GetName(), 12, 5*time.Second)
 	}
-	t.Log("Asserting nodes")
-	assert.Equal(t, len(nodes.Items), 1)
+
+	// check nodes scaled
+	nodesNow := k8s.GetReadyNodes(t, options)
+	test_structure.SaveInt(t, workingDir, "nodes_postdeployment", len(nodesNow))
+	if len(nodesNow) <= len(nodesPre) {
+		t.Errorf("test did not scale up nodes pre: %v post: %v", len(nodesPre), len(nodesNow))
+	}
+	logger.Logf(t, "scaled up from %v node(s), to %v", len(nodesPre), len(nodesNow))
+}
+
+// Validate the cluster can scale down
+func validateNodeScaleDown(t *testing.T, workingDir string) {
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
+	options := k8s.NewKubectlOptions("", kubeconfig, "default")
+	nodesPre := test_structure.LoadInt(t, workingDir, "nodes_predeployment")
+	nodesPost := test_structure.LoadInt(t, workingDir, "nodes_postdeployment")
+
+	// Sleep to trigger karpenter node expiration
+	logger.Logf(t, "sleeping to permit karpenter to consolidate nodes")
+	time.Sleep(180 * time.Second)
+	nodesNow := k8s.GetReadyNodes(t, options)
+
+	if nodesPre != len(nodesNow) {
+		t.Errorf("expected nodes to scale back down from %v to %v", len(nodesNow), nodesPre)
+	}
+	logger.Logf(t, "nodes scaled back down from %v nodes, to %v", nodesPost, len(nodesNow))
+}
+
+// Validate storage class creates volumes
+func validateStorageClass(t *testing.T, workingDir string) {
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
+	kubeResourcePath := "../examples/main/manifests/storage_class_test.yaml"
+	options := k8s.NewKubectlOptions("", kubeconfig, "default")
+	filter := v1.ListOptions{
+		LabelSelector: "app=storage-class-test",
+	}
+
+	defer k8s.KubectlDelete(t, options, kubeResourcePath)
+	k8s.KubectlApply(t, options, kubeResourcePath)
+	k8s.WaitUntilNumPodsCreated(t, options, filter, 1, 6, 5*time.Second)
+	k8s.WaitUntilAllNodesReady(t, options, 12, 10*time.Second)
+
+	pods := k8s.ListPods(t, options, filter)
+	for _, pod := range pods {
+		k8s.WaitUntilPodAvailable(t, options, pod.GetName(), 12, 5*time.Second)
+	}
+	logger.Logf(t, "created pod with pvc")
 }

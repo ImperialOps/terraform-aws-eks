@@ -195,6 +195,8 @@ module "karpenter_helm" {
       value = "info"
     }
   ]
+
+  depends_on = [module.eks]
 }
 
 resource "kubectl_manifest" "karpenter_provisioner" {
@@ -213,12 +215,12 @@ resource "kubectl_manifest" "karpenter_provisioner" {
       - key: karpenter.sh/capacity-type
         operator: In
         values: ["spot", "on-demand"]
-      - key: karpenter.k8s.aws/instance-category
+      - key: "karpenter.k8s.aws/instance-category"
         operator: In
-        values: ["t"]
-      - key: karpenter.k8s.aws/instance-family
+        values: ["m", "c", "r"]
+      - key: "karpenter.k8s.aws/instance-cpu"
         operator: In
-        values: ["t3", "t3a"]
+        values: ["1", "2", "4", "8", "16", "32"]
     limits:
       resources:
         cpu: ${var.karpenter_provisioner_max_cpu}
