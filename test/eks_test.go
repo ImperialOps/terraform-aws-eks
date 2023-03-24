@@ -135,6 +135,7 @@ func validateNodeScaleUp(t *testing.T, workingDir string) {
 	defer k8s.KubectlDelete(t, options, kubeResourcePath)
 	k8s.KubectlApply(t, options, kubeResourcePath)
 	k8s.WaitUntilNumPodsCreated(t, options, filter, 4, 6, 5*time.Second)
+    time.Sleep(10*time.Second) // wait for node to be created
 	k8s.WaitUntilAllNodesReady(t, options, 12, 10*time.Second)
 
 	pods := k8s.ListPods(t, options, filter)
@@ -159,7 +160,7 @@ func validateNodeScaleDown(t *testing.T, workingDir string) {
 	nodesPre := test_structure.LoadInt(t, workingDir, "nodes_predeployment")
 	nodesPost := test_structure.LoadInt(t, workingDir, "nodes_postdeployment")
 
-	// Sleep to trigger karpenter node expiration
+	// Sleep to trigger karpenter node consolidation
 	logger.Logf(t, "sleeping to permit karpenter to consolidate nodes")
 	time.Sleep(180 * time.Second)
 	nodesNow := k8s.GetReadyNodes(t, options)
@@ -179,9 +180,12 @@ func validateStorageClass(t *testing.T, workingDir string) {
 		LabelSelector: "app=storage-class-test",
 	}
 
+	// Sleep to trigger karpenter node consolidation
+	defer time.Sleep(180 * time.Second)
 	defer k8s.KubectlDelete(t, options, kubeResourcePath)
 	k8s.KubectlApply(t, options, kubeResourcePath)
 	k8s.WaitUntilNumPodsCreated(t, options, filter, 1, 6, 5*time.Second)
+    time.Sleep(10*time.Second) // wait for node to be created
 	k8s.WaitUntilAllNodesReady(t, options, 12, 10*time.Second)
 
 	pods := k8s.ListPods(t, options, filter)
