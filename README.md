@@ -62,10 +62,10 @@ make test
 
 | Name | Version |
 |------|---------|
-| <a name="provider_aws"></a> [aws](#provider\_aws) | 4.58.0 |
-| <a name="provider_aws.virginia"></a> [aws.virginia](#provider\_aws.virginia) | 4.58.0 |
-| <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | 1.14.0 |
-| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | 2.18.1 |
+| <a name="provider_aws"></a> [aws](#provider\_aws) | >= 4.0 |
+| <a name="provider_aws.virginia"></a> [aws.virginia](#provider\_aws.virginia) | >= 4.0 |
+| <a name="provider_kubectl"></a> [kubectl](#provider\_kubectl) | >= 1.0 |
+| <a name="provider_kubernetes"></a> [kubernetes](#provider\_kubernetes) | >= 2.0 |
 
 ## Modules
 
