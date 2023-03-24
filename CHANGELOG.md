@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.6.0](https://github.com/stuxcd/terraform-aws-eks/compare/v1.5.0...v1.6.0) (2023-03-24)
+
+
+### Features
+
+* **pre-commit:** move terraform docs to run before validate ([#34](https://github.com/stuxcd/terraform-aws-eks/issues/34)) ([cb6b093](https://github.com/stuxcd/terraform-aws-eks/commit/cb6b0938947dc1e92bc144db6482f65a30b84cb3))
+
 ## [1.5.0](https://github.com/stuxcd/terraform-aws-eks/compare/v1.4.0...v1.5.0) (2023-03-24)
 
 
