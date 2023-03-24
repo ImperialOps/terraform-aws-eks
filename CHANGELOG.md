@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.5.0](https://github.com/stuxcd/terraform-aws-eks/compare/v1.4.0...v1.5.0) (2023-03-24)
+
+
+### Features
+
+* **terratest:** add terratest and upgrade eks version ([#33](https://github.com/stuxcd/terraform-aws-eks/issues/33)) ([626c91a](https://github.com/stuxcd/terraform-aws-eks/commit/626c91a43a388b3fe2606f00ca988993dc4e330b))
+
 ## [1.4.0](https://github.com/stuxcd/terraform-aws-eks/compare/v1.3.2...v1.4.0) (2022-12-06)
 
 
