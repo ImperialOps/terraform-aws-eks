@@ -1,6 +1,9 @@
 # Terraform lockfile
 .terraform.lock.hcl
 
+# Terratest test data
+.test-data
+
 # Local .terraform directories
 **/.terraform/*
 
