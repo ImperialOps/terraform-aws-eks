@@ -80,6 +80,15 @@ module "eks" {
         subnet_ids = [element(var.subnet_ids, i)]
       }
     },
+    { for i in range(0, length(var.subnet_ids)) :
+      "${local.name}-crossplane-${i}" => {
+        selectors = [
+          { namespace = local.crossplane_namespace }
+        ]
+        # We want to create a profile per AZ for high availability
+        subnet_ids = [element(var.subnet_ids, i)]
+      }
+    },
   )
 
   # Encryption key
@@ -323,8 +332,9 @@ module "crossplane_irsa" {
   source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
   version = ">= 5.14"
 
-  create_role = local.create_crossplane
-  role_name   = "crossplane-${local.name}"
+  create_role                = local.create_crossplane
+  role_name                  = "crossplane-${local.name}"
+  assume_role_condition_test = "StringLike"
 
   role_policy_arns = {
     "administrator" = data.aws_iam_policy.crossplane.arn
