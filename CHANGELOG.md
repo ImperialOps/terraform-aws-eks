@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+### [1.6.1](https://github.com/stuxcd/terraform-aws-eks/compare/v1.6.0...v1.6.1) (2023-03-24)
+
+
+### Bug Fixes
+
+* **security:** patch go module versions ([#35](https://github.com/stuxcd/terraform-aws-eks/issues/35)) ([50effe5](https://github.com/stuxcd/terraform-aws-eks/commit/50effe501d2988287c1d20a25a92c9f372f94d1a))
+
 ## [1.6.0](https://github.com/stuxcd/terraform-aws-eks/compare/v1.5.0...v1.6.0) (2023-03-24)
 
 
