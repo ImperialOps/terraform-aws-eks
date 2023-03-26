@@ -333,7 +333,7 @@ module "crossplane_irsa" {
   oidc_providers = {
     ex = {
       provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["${local.crossplane_namespace}:*"]
+      namespace_service_accounts = ["${local.crossplane_namespace}:provider-aws-*"]
     }
   }
 
@@ -385,7 +385,7 @@ resource "kubectl_manifest" "crossplane_provider" {
   metadata:
     name: provider-aws
   spec:
-    package: xpkg.upbound.io/crossplane-contrib/provider-aws:v0.38.0
+    package: crossplane/provider-aws:v0.38.0
     controllerConfigRef:
       name: aws-config
   YAML
