@@ -50,6 +50,8 @@ module "eks" {
   karpenter_node_volume_size       = 40
   karpenter_tag_key                = "karpenter.sh/discovery/${local.cluster_name}"
 
+  create_crossplane = true
+
   tags = local.tags
 }
 

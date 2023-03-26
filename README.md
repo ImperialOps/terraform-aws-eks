@@ -71,7 +71,9 @@ make test
 
 | Name | Source | Version |
 |------|--------|---------|
-| <a name="module_ebs_csi_irsa_role"></a> [ebs\_csi\_irsa\_role](#module\_ebs\_csi\_irsa\_role) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | >= 5.13 |
+| <a name="module_crossplane_helm"></a> [crossplane\_helm](#module\_crossplane\_helm) | terraform-module/release/helm | 2.8.0 |
+| <a name="module_crossplane_irsa"></a> [crossplane\_irsa](#module\_crossplane\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | >= 5.14 |
+| <a name="module_ebs_csi_irsa"></a> [ebs\_csi\_irsa](#module\_ebs\_csi\_irsa) | terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks | >= 5.14 |
 | <a name="module_eks"></a> [eks](#module\_eks) | terraform-aws-modules/eks/aws | ~> 19.0 |
 | <a name="module_karpenter_helm"></a> [karpenter\_helm](#module\_karpenter\_helm) | terraform-module/release/helm | 2.8.0 |
 | <a name="module_karpenter_irsa"></a> [karpenter\_irsa](#module\_karpenter\_irsa) | terraform-aws-modules/eks/aws//modules/karpenter | ~> 19.0 |
@@ -82,11 +84,15 @@ make test
 | Name | Type |
 |------|------|
 | [aws_iam_service_linked_role.spot](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/resources/iam_service_linked_role) | resource |
+| [kubectl_manifest.crossplane_controller_config](https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/manifest) | resource |
+| [kubectl_manifest.crossplane_provider](https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/manifest) | resource |
+| [kubectl_manifest.crossplane_provider_config](https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/manifest) | resource |
 | [kubectl_manifest.karpenter_node_template](https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/manifest) | resource |
 | [kubectl_manifest.karpenter_provisioner](https://registry.terraform.io/providers/gavinbunney/kubectl/latest/docs/resources/manifest) | resource |
 | [kubernetes_storage_class.this](https://registry.terraform.io/providers/hashicorp/kubernetes/latest/docs/resources/storage_class) | resource |
 | [aws_caller_identity.current](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/caller_identity) | data source |
 | [aws_ecrpublic_authorization_token.virginia](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/ecrpublic_authorization_token) | data source |
+| [aws_iam_policy.crossplane](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/iam_policy) | data source |
 | [aws_kms_key.aws_ebs](https://registry.terraform.io/providers/hashicorp/aws/latest/docs/data-sources/kms_key) | data source |
 
 ## Inputs
@@ -99,6 +105,7 @@ make test
 | <a name="input_cluster_version"></a> [cluster\_version](#input\_cluster\_version) | Version of the EKS cluster | `string` | `"1.24"` | no |
 | <a name="input_control_plane_subnet_ids"></a> [control\_plane\_subnet\_ids](#input\_control\_plane\_subnet\_ids) | A list of subnet IDs where the EKS cluster control plane (ENIs) will be provisioned. Used for expanding the pool of subnets used by nodes/node groups without replacing the EKS control plane | `list(string)` | `[]` | no |
 | <a name="input_create"></a> [create](#input\_create) | Controls if EKS resources should be created (affects nearly all resources) | `bool` | `true` | no |
+| <a name="input_create_crossplane"></a> [create\_crossplane](#input\_create\_crossplane) | Controls whether to deploy CrossPlane and the AWS provider with Admin access | `bool` | `true` | no |
 | <a name="input_create_karpenter"></a> [create\_karpenter](#input\_create\_karpenter) | Controls whether to deploy the a Karpenter | `bool` | `true` | no |
 | <a name="input_create_karpenter_provisioner"></a> [create\_karpenter\_provisioner](#input\_create\_karpenter\_provisioner) | Controls whether to deploy the a default Karpenter provisioner | `bool` | `true` | no |
 | <a name="input_create_spot_service_linked_role"></a> [create\_spot\_service\_linked\_role](#input\_create\_spot\_service\_linked\_role) | Controls whether or not to create the spot.amazonaws.com service linked role | `bool` | `true` | no |
