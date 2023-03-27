@@ -35,7 +35,7 @@ module "eks" {
     kube-proxy = {}
     vpc-cni    = {}
     aws-ebs-csi-driver = {
-      service_account_role_arn = module.ebs_csi_irsa_role.iam_role_arn
+      service_account_role_arn = module.ebs_csi_irsa.iam_role_arn
     }
     coredns = {
       configuration_values = jsonencode({
@@ -71,7 +71,7 @@ module "eks" {
         subnet_ids = [element(var.subnet_ids, i)]
       }
     },
-    { for i in range(0, length(var.subnet_ids)) :
+    local.create_karpenter ? { for i in range(0, length(var.subnet_ids)) :
       "${local.name}-karpenter-${i}" => {
         selectors = [
           { namespace = "karpenter" }
@@ -79,7 +79,16 @@ module "eks" {
         # We want to create a profile per AZ for high availability
         subnet_ids = [element(var.subnet_ids, i)]
       }
-    },
+    } : {},
+    local.create_crossplane ? { for i in range(0, length(var.subnet_ids)) :
+      "${local.name}-crossplane-${i}" => {
+        selectors = [
+          { namespace = local.crossplane_namespace }
+        ]
+        # We want to create a profile per AZ for high availability
+        subnet_ids = [element(var.subnet_ids, i)]
+      }
+    } : {},
   )
 
   # Encryption key
@@ -97,24 +106,6 @@ module "eks" {
 ################################################################################
 # IAM
 ################################################################################
-
-module "ebs_csi_irsa_role" {
-  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
-  version = ">= 5.13"
-
-  create_role           = local.create
-  role_name             = "ebs-csi-${local.name}"
-  attach_ebs_csi_policy = true
-
-  oidc_providers = {
-    ex = {
-      provider_arn               = module.eks.oidc_provider_arn
-      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
-    }
-  }
-
-  tags = local.tags
-}
 
 resource "aws_iam_service_linked_role" "spot" {
   count = local.create && var.create_spot_service_linked_role ? 1 : 0
@@ -293,6 +284,24 @@ resource "kubectl_manifest" "karpenter_node_template" {
 # STORAGE CLASS
 ################################################################################
 
+module "ebs_csi_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = ">= 5.14"
+
+  create_role           = local.create
+  role_name             = "ebs-csi-${local.name}"
+  attach_ebs_csi_policy = true
+
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["kube-system:ebs-csi-controller-sa"]
+    }
+  }
+
+  tags = local.tags
+}
+
 resource "kubernetes_storage_class" "this" {
   count = local.create ? 1 : 0
 
@@ -308,6 +317,124 @@ resource "kubernetes_storage_class" "this" {
     encrypted = "true"
     kmsKeyId  = data.aws_kms_key.aws_ebs.arn
   }
+}
+
+################################################################################
+# CROSSPLANE
+################################################################################
+
+locals {
+  create_crossplane    = local.create && var.create_crossplane
+  crossplane_namespace = "crossplane-system"
+}
+
+module "crossplane_irsa" {
+  source  = "terraform-aws-modules/iam/aws//modules/iam-role-for-service-accounts-eks"
+  version = ">= 5.14"
+
+  create_role                = local.create_crossplane
+  role_name                  = "crossplane-${local.name}"
+  assume_role_condition_test = "StringLike"
+
+  role_policy_arns = {
+    "administrator" = data.aws_iam_policy.crossplane.arn
+  }
+
+  oidc_providers = {
+    ex = {
+      provider_arn               = module.eks.oidc_provider_arn
+      namespace_service_accounts = ["${local.crossplane_namespace}:provider-aws-*"]
+    }
+  }
+
+  tags = local.tags
+}
+
+module "crossplane_helm" {
+  source  = "terraform-module/release/helm"
+  version = "2.8.0"
+
+  namespace  = local.crossplane_namespace
+  repository = "https://charts.crossplane.io/stable"
+
+  app = {
+    deploy           = local.create_crossplane
+    create_namespace = local.create_crossplane
+    name             = "crossplane"
+    version          = "1.11.2"
+    chart            = "crossplane"
+  }
+
+  depends_on = [module.eks]
+}
+
+resource "kubectl_manifest" "crossplane_controller_config" {
+  count = local.create_crossplane ? 1 : 0
+
+  yaml_body = <<-YAML
+  apiVersion: pkg.crossplane.io/v1alpha1
+  kind: ControllerConfig
+  metadata:
+    name: aws-config
+    annotations:
+      eks.amazonaws.com/role-arn: ${module.crossplane_irsa.iam_role_arn}
+  spec:
+    podSecurityContext:
+      fsGroup: 2000
+  YAML
+
+  depends_on = [module.crossplane_helm]
+}
+
+# allow time for provider to be terminated
+resource "time_sleep" "wait_30_seconds_provider_destroy" {
+  count = local.create_crossplane ? 1 : 0
+
+  destroy_duration = "60s"
+
+  depends_on = [kubectl_manifest.crossplane_controller_config]
+}
+
+resource "kubectl_manifest" "crossplane_provider" {
+  count = local.create_crossplane ? 1 : 0
+
+  yaml_body = <<-YAML
+  apiVersion: pkg.crossplane.io/v1
+  kind: Provider
+  metadata:
+    name: provider-aws
+  spec:
+    package: xpkg.upbound.io/crossplane-contrib/provider-aws:v0.38.0
+    controllerConfigRef:
+      name: aws-config
+  YAML
+
+  depends_on = [time_sleep.wait_30_seconds_provider_destroy]
+}
+
+# allow time for provider CRDs
+resource "time_sleep" "wait_30_seconds_provider_install" {
+  count = local.create_crossplane ? 1 : 0
+
+  create_duration = "30s"
+
+  depends_on = [kubectl_manifest.crossplane_provider]
+}
+
+resource "kubectl_manifest" "crossplane_provider_config" {
+  count = local.create_crossplane ? 1 : 0
+
+  yaml_body = <<-YAML
+  apiVersion: aws.crossplane.io/v1beta1
+  kind: ProviderConfig
+  metadata:
+    name: aws-provider
+  spec:
+    credentials:
+      source: InjectedIdentity
+  YAML
+
+  depends_on = [time_sleep.wait_30_seconds_provider_install]
 }
 
 ################################################################################

@@ -11,3 +11,7 @@ data "aws_kms_key" "aws_ebs" {
 data "aws_ecrpublic_authorization_token" "virginia" {
   provider = aws.virginia
 }
+
+data "aws_iam_policy" "crossplane" {
+  name = "AdministratorAccess"
+}

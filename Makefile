@@ -16,12 +16,11 @@ WARN=: WARN
 FAIL=: FAIL
 endif
 
-.SILENT: install_reqs
-
 ##############################################
 ## REQUIREMENTS
 ##############################################
 
+.SILENT: install_reqs
 install_reqs:
 	${INFO} "verifying brew"
 	if ! brew --version >/dev/null 2>&1; then \
@@ -35,6 +34,7 @@ install_reqs:
 
 # The 3h timeout is important
 # should the tests exceed this limit go will not run the function to destroy deployments
+.SILENT: test
 test:
 	${INFO} "running tests"
 	cd test
