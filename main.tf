@@ -179,7 +179,7 @@ module "karpenter_helm" {
     },
     {
       name  = "replicas"
-      value = "2"
+      value = "1"
     },
     {
       name  = "loglevel"
