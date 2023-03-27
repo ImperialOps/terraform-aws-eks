@@ -71,7 +71,7 @@ module "eks" {
         subnet_ids = [element(var.subnet_ids, i)]
       }
     },
-    { for i in range(0, length(var.subnet_ids)) :
+    local.create_karpenter ? { for i in range(0, length(var.subnet_ids)) :
       "${local.name}-karpenter-${i}" => {
         selectors = [
           { namespace = "karpenter" }
@@ -79,8 +79,8 @@ module "eks" {
         # We want to create a profile per AZ for high availability
         subnet_ids = [element(var.subnet_ids, i)]
       }
-    },
-    { for i in range(0, length(var.subnet_ids)) :
+    } : {},
+    local.create_crossplane ? { for i in range(0, length(var.subnet_ids)) :
       "${local.name}-crossplane-${i}" => {
         selectors = [
           { namespace = local.crossplane_namespace }
@@ -88,7 +88,7 @@ module "eks" {
         # We want to create a profile per AZ for high availability
         subnet_ids = [element(var.subnet_ids, i)]
       }
-    },
+    } : {},
   )
 
   # Encryption key
@@ -386,6 +386,15 @@ resource "kubectl_manifest" "crossplane_controller_config" {
   depends_on = [module.crossplane_helm]
 }
 
+# allow time for provider to be terminated
+resource "time_sleep" "wait_30_seconds_provider_destroy" {
+  count = local.create_crossplane ? 1 : 0
+
+  destroy_duration = "60s"
+
+  depends_on = [kubectl_manifest.crossplane_controller_config]
+}
+
 resource "kubectl_manifest" "crossplane_provider" {
   count = local.create_crossplane ? 1 : 0
 
@@ -395,12 +404,21 @@ resource "kubectl_manifest" "crossplane_provider" {
   metadata:
     name: provider-aws
   spec:
-    package: crossplane/provider-aws:v0.38.0
+    package: xpkg.upbound.io/crossplane-contrib/provider-aws:v0.38.0
     controllerConfigRef:
       name: aws-config
   YAML
 
-  depends_on = [module.crossplane_helm]
+  depends_on = [time_sleep.wait_30_seconds_provider_destroy]
+}
+
+# allow time for provider CRDs
+resource "time_sleep" "wait_30_seconds_provider_install" {
+  count = local.create_crossplane ? 1 : 0
+
+  create_duration = "30s"
+
+  depends_on = [kubectl_manifest.crossplane_provider]
 }
 
 resource "kubectl_manifest" "crossplane_provider_config" {
@@ -416,7 +434,7 @@ resource "kubectl_manifest" "crossplane_provider_config" {
       source: InjectedIdentity
   YAML
 
-  depends_on = [module.crossplane_helm]
+  depends_on = [time_sleep.wait_30_seconds_provider_install]
 }
 
 ################################################################################
