@@ -11,21 +11,34 @@ Terraform module which creates a simple public EKS cluster and all supporting re
 module "eks" {
   source = "github.com/stuxcd/terraform-aws-eks"
 
-  ## required
-  cluster_name = "demo"
-  vpc_id       = module.vpc.vpc_id
-  subnet_ids   = module.vpc.private_subnets
+  providers = {
+    aws          = aws
+    aws.virginia = aws.virginia
+  }
 
-  ## optional
-  cluster_version                  = "1.24"
-  cluster_endpoint_private_access  = false
-  cluster_endpoint_public_access   = true
-  node_volume_size                 = 40
-  deploy_karpenter_provisioner     = true
+  create          = true
+  cluster_name    = local.cluster_name
+  cluster_version = local.cluster_version
+
+  vpc_id                   = module.vpc.vpc_id
+  subnet_ids               = module.vpc.private_subnets
+  control_plane_subnet_ids = module.vpc.intra_subnets
+  subnet_account_id        = data.aws_caller_identity.current.account_id
+
+  cluster_endpoint_private_access = false
+  cluster_endpoint_public_access  = true
+  create_spot_service_linked_role = false
+
+  create_karpenter                 = true
+  create_karpenter_provisioner     = true
   karpenter_provisioner_max_cpu    = 40
   karpenter_provisioner_max_memory = 80
-  create_spot_service_linked_role  = false
-  tags                             = {}
+  karpenter_node_volume_size       = 40
+  karpenter_tag_key                = "karpenter.sh/discovery/${local.cluster_name}"
+
+  create_crossplane = true
+
+  tags = local.tags
 }
 ```
 
