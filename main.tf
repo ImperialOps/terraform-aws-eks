@@ -190,6 +190,15 @@ module "karpenter_helm" {
   depends_on = [module.eks]
 }
 
+# allow time for karpenter to come up or will run into errors when testing
+resource "time_sleep" "wait_60_seconds_karpenter" {
+  count = local.create_karpenter_provisioner ? 1 : 0
+
+  create_duration = "60s"
+
+  depends_on = [module.karpenter_helm]
+}
+
 resource "kubectl_manifest" "karpenter_provisioner" {
   count = local.create_karpenter_provisioner ? 1 : 0
 
@@ -245,7 +254,7 @@ resource "kubectl_manifest" "karpenter_provisioner" {
       name: default
   YAML
 
-  depends_on = [module.karpenter_helm]
+  depends_on = [time_sleep.wait_60_seconds_karpenter]
 }
 
 resource "kubectl_manifest" "karpenter_node_template" {
@@ -277,7 +286,7 @@ resource "kubectl_manifest" "karpenter_node_template" {
           throughput: 125
   YAML
 
-  depends_on = [module.karpenter_helm]
+  depends_on = [time_sleep.wait_60_seconds_karpenter]
 }
 
 ################################################################################
