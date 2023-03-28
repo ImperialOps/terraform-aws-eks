@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "github.com/aws/aws-sdk-go/service/iam"
 )
 
 func TestTerraformAwsEks(t *testing.T) {
@@ -62,6 +63,12 @@ func TestTerraformAwsEks(t *testing.T) {
 	// Validate storage class creates volumes
 	test_structure.RunTestStage(t, "storage_class", func() {
 		validateStorageClass(t, workingDir)
+	})
+
+	// Validate crossplane creates resouse
+	test_structure.RunTestStage(t, "crossplane", func() {
+		awsRegion := test_structure.LoadString(t, workingDir, "aws_region")
+		validateCrossplane(t, awsRegion, workingDir)
 	})
 }
 
@@ -193,4 +200,29 @@ func validateStorageClass(t *testing.T, workingDir string) {
 		k8s.WaitUntilPodAvailable(t, options, pod.GetName(), 12, 5*time.Second)
 	}
 	logger.Logf(t, "created pod with pvc")
+}
+
+// Validate Crossplane create resource
+func validateCrossplane(t *testing.T, awsRegion string, workingDir string) {
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
+	kubeResourcePath := "../examples/main/manifests/crossplane_test.yaml"
+	options := k8s.NewKubectlOptions("", kubeconfig, "default")
+
+    sess, err := aws.NewAuthenticatedSession(awsRegion)
+    require.NoError(t, err, "expected no error creating aws session") 
+    accountId := aws.GetAccountId(t)
+    svc := iam.New(sess) 
+    policyArn := fmt.Sprintf("arn:aws:iam::%s:policy/crossplane-test", accountId)
+    params := &iam.GetPolicyInput{
+        PolicyArn: &policyArn,
+    }
+
+	// Sleep to allow provider to delete resource
+	defer k8s.KubectlDelete(t, options, kubeResourcePath)
+	defer time.Sleep(180 * time.Second)
+	k8s.KubectlApply(t, options, kubeResourcePath)
+    err = svc.WaitUntilPolicyExists(params)
+    require.NoError(t, err, "expected no error waiting for policy to be created")
+
+	logger.Logf(t, "created aws iam policy")
 }
