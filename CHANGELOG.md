@@ -2,6 +2,18 @@
 
 All notable changes to this project will be documented in this file.
 
+## [1.7.0](https://github.com/ImperialOps/terraform-aws-eks/compare/v1.6.1...v1.7.0) (2023-03-31)
+
+
+### Features
+
+* **crossplane:** add crossplane ([#36](https://github.com/ImperialOps/terraform-aws-eks/issues/36)) ([36db9a8](https://github.com/ImperialOps/terraform-aws-eks/commit/36db9a845bb994b7234e99065b364c61dbc37223))
+
+
+### Bug Fixes
+
+* **karpenter:** reduce karpenter replica count to 1 ([#37](https://github.com/ImperialOps/terraform-aws-eks/issues/37)) ([34110e3](https://github.com/ImperialOps/terraform-aws-eks/commit/34110e30d212c57e421756fd7370f3a207906765))
+
 ### [1.6.1](https://github.com/stuxcd/terraform-aws-eks/compare/v1.6.0...v1.6.1) (2023-03-24)
 
 
