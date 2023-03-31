@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	v1 "k8s.io/apimachinery/pkg/apis/meta/v1"
+    "github.com/aws/aws-sdk-go/service/iam"
 )
 
 func TestTerraformAwsEks(t *testing.T) {
@@ -63,13 +64,19 @@ func TestTerraformAwsEks(t *testing.T) {
 	test_structure.RunTestStage(t, "storage_class", func() {
 		validateStorageClass(t, workingDir)
 	})
+
+	// Validate crossplane creates resouse
+	test_structure.RunTestStage(t, "crossplane", func() {
+		awsRegion := test_structure.LoadString(t, workingDir, "aws_region")
+		validateCrossplane(t, awsRegion, workingDir)
+	})
 }
 
 // Deploy the terraform-packer-example using Terraform
 func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 	// a unique cluster ID so we won't clash with anything already in the AWS account
 	clusterName := fmt.Sprintf("terratest-%s", random.UniqueId())
-	t.Logf("cluster name is: %s", clusterName)
+	logger.Logf(t, "cluster name is: %s", clusterName)
 	test_structure.SaveString(t, workingDir, "cluster_name", clusterName)
 
 	// Construct the terraform options with default retryable errors to handle the most common retryable errors in
@@ -147,9 +154,8 @@ func validateNodeScaleUp(t *testing.T, workingDir string) {
 	// check nodes scaled
 	nodesNow := k8s.GetReadyNodes(t, options)
 	test_structure.SaveInt(t, workingDir, "nodes_postdeployment", len(nodesNow))
-	if len(nodesNow) <= len(nodesPre) {
-		t.Errorf("test did not scale up nodes pre: %v post: %v", len(nodesPre), len(nodesNow))
-	}
+
+    assert.Greater(t, len(nodesNow), len(nodesPre), "test did not scale up nodes after applying deployment pre: %v post: %v", len(nodesPre), len(nodesNow))
 	logger.Logf(t, "scaled up from %v node(s), to %v", len(nodesPre), len(nodesNow))
 }
 
@@ -157,7 +163,6 @@ func validateNodeScaleUp(t *testing.T, workingDir string) {
 func validateNodeScaleDown(t *testing.T, workingDir string) {
 	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
 	options := k8s.NewKubectlOptions("", kubeconfig, "default")
-	nodesPre := test_structure.LoadInt(t, workingDir, "nodes_predeployment")
 	nodesPost := test_structure.LoadInt(t, workingDir, "nodes_postdeployment")
 
 	// Sleep to trigger karpenter node consolidation
@@ -165,10 +170,8 @@ func validateNodeScaleDown(t *testing.T, workingDir string) {
 	time.Sleep(180 * time.Second)
 	nodesNow := k8s.GetReadyNodes(t, options)
 
-	if nodesPre != len(nodesNow) {
-		t.Errorf("expected nodes to scale back down from %v to %v", len(nodesNow), nodesPre)
-	}
-	logger.Logf(t, "nodes scaled back down from %v nodes, to %v", nodesPost, len(nodesNow))
+    assert.Less(t, len(nodesNow), nodesPost, "test did not scale down nodes after deleting deployment pre: %v, post: %v", nodesPost, len(nodesNow))
+	logger.Logf(t, "scaled down from %v node(s), to %v", nodesPost, len(nodesNow))
 }
 
 // Validate storage class creates volumes
@@ -193,4 +196,29 @@ func validateStorageClass(t *testing.T, workingDir string) {
 		k8s.WaitUntilPodAvailable(t, options, pod.GetName(), 12, 5*time.Second)
 	}
 	logger.Logf(t, "created pod with pvc")
+}
+
+// Validate Crossplane create resource
+func validateCrossplane(t *testing.T, awsRegion string, workingDir string) {
+	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
+	kubeResourcePath := "../examples/main/manifests/crossplane_test.yaml"
+	options := k8s.NewKubectlOptions("", kubeconfig, "default")
+
+    sess, err := aws.NewAuthenticatedSession(awsRegion)
+    require.NoError(t, err, "expected no error creating aws session") 
+    accountId := aws.GetAccountId(t)
+    svc := iam.New(sess) 
+    policyArn := fmt.Sprintf("arn:aws:iam::%s:policy/crossplane-test", accountId)
+    params := &iam.GetPolicyInput{
+        PolicyArn: &policyArn,
+    }
+
+	// Sleep to allow provider to delete resource
+	defer k8s.KubectlDelete(t, options, kubeResourcePath)
+	defer time.Sleep(180 * time.Second)
+	k8s.KubectlApply(t, options, kubeResourcePath)
+
+    err = svc.WaitUntilPolicyExists(params)
+    require.NoError(t, err, "expected no error waiting for policy to be created")
+	logger.Logf(t, "created aws iam policy")
 }
