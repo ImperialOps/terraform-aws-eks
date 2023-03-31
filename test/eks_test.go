@@ -76,7 +76,7 @@ func TestTerraformAwsEks(t *testing.T) {
 func deployUsingTerraform(t *testing.T, awsRegion string, workingDir string) {
 	// a unique cluster ID so we won't clash with anything already in the AWS account
 	clusterName := fmt.Sprintf("terratest-%s", random.UniqueId())
-	t.Logf("cluster name is: %s", clusterName)
+	logger.Logf(t, "cluster name is: %s", clusterName)
 	test_structure.SaveString(t, workingDir, "cluster_name", clusterName)
 
 	// Construct the terraform options with default retryable errors to handle the most common retryable errors in
@@ -154,9 +154,8 @@ func validateNodeScaleUp(t *testing.T, workingDir string) {
 	// check nodes scaled
 	nodesNow := k8s.GetReadyNodes(t, options)
 	test_structure.SaveInt(t, workingDir, "nodes_postdeployment", len(nodesNow))
-	if len(nodesNow) <= len(nodesPre) {
-		t.Errorf("test did not scale up nodes pre: %v post: %v", len(nodesPre), len(nodesNow))
-	}
+
+    assert.Greater(t, len(nodesNow), len(nodesPre), "test did not scale up nodes after applying deployment pre: %v post: %v", len(nodesPre), len(nodesNow))
 	logger.Logf(t, "scaled up from %v node(s), to %v", len(nodesPre), len(nodesNow))
 }
 
@@ -164,7 +163,6 @@ func validateNodeScaleUp(t *testing.T, workingDir string) {
 func validateNodeScaleDown(t *testing.T, workingDir string) {
 	kubeconfig := test_structure.LoadString(t, workingDir, "kubeconfig")
 	options := k8s.NewKubectlOptions("", kubeconfig, "default")
-	nodesPre := test_structure.LoadInt(t, workingDir, "nodes_predeployment")
 	nodesPost := test_structure.LoadInt(t, workingDir, "nodes_postdeployment")
 
 	// Sleep to trigger karpenter node consolidation
@@ -172,10 +170,8 @@ func validateNodeScaleDown(t *testing.T, workingDir string) {
 	time.Sleep(180 * time.Second)
 	nodesNow := k8s.GetReadyNodes(t, options)
 
-	if nodesPre != len(nodesNow) {
-		t.Errorf("expected nodes to scale back down from %v to %v", len(nodesNow), nodesPre)
-	}
-	logger.Logf(t, "nodes scaled back down from %v nodes, to %v", nodesPost, len(nodesNow))
+    assert.Less(t, len(nodesNow), nodesPost, "test did not scale down nodes after deleting deployment pre: %v, post: %v", nodesPost, len(nodesNow))
+	logger.Logf(t, "scaled down from %v node(s), to %v", nodesPost, len(nodesNow))
 }
 
 // Validate storage class creates volumes
@@ -221,8 +217,8 @@ func validateCrossplane(t *testing.T, awsRegion string, workingDir string) {
 	defer k8s.KubectlDelete(t, options, kubeResourcePath)
 	defer time.Sleep(180 * time.Second)
 	k8s.KubectlApply(t, options, kubeResourcePath)
+
     err = svc.WaitUntilPolicyExists(params)
     require.NoError(t, err, "expected no error waiting for policy to be created")
-
 	logger.Logf(t, "created aws iam policy")
 }
