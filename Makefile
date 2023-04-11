@@ -27,7 +27,7 @@ install_reqs:
 	  ${FAIL} "you must install brew" 1; \
 	fi
 	${INFO} "installing requirements"
-	brew install infracost terraform tflint terraform-docs infracost pre-commit commitizen go
+	brew install terraform tflint terraform-docs infracost pre-commit commitizen go
 	${INFO} "installing pre-commit"
 	pre-commit install
 	cd test && go mod download
