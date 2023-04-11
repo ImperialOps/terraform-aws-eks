@@ -2,6 +2,13 @@
 
 All notable changes to this project will be documented in this file.
 
+### [1.7.1](https://github.com/ImperialOps/terraform-aws-eks/compare/v1.7.0...v1.7.1) (2023-04-11)
+
+
+### Bug Fixes
+
+* **makefile:** remove duplicate infracost installs ([ce630c4](https://github.com/ImperialOps/terraform-aws-eks/commit/ce630c42a960f2d75dd9f60fc02d46cc96b0c240))
+
 ## [1.7.0](https://github.com/ImperialOps/terraform-aws-eks/compare/v1.6.1...v1.7.0) (2023-03-31)
 
 
