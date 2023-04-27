@@ -141,7 +141,7 @@ module "karpenter_irsa" {
 
 module "karpenter_helm" {
   source  = "terraform-module/release/helm"
-  version = "2.8.0"
+  version = "2.8.1"
 
   namespace  = "karpenter"
   repository = "oci://public.ecr.aws/karpenter"
@@ -361,7 +361,7 @@ module "crossplane_irsa" {
 
 module "crossplane_helm" {
   source  = "terraform-module/release/helm"
-  version = "2.8.0"
+  version = "2.8.1"
 
   namespace  = local.crossplane_namespace
   repository = "https://charts.crossplane.io/stable"
